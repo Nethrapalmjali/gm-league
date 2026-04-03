@@ -98,6 +98,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const pollInterval = setInterval(async () => {
+      // Only poll if window is focused to save battery and network
+      if (typeof document !== 'undefined' && document.hidden) return;
+
       try {
         const res = await fetch(`/api/data?t=${Date.now()}`, {
             headers: { 'ngrok-skip-browser-warning': '69420' },
@@ -105,13 +108,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
         if (res.ok) {
           const freshData = await res.json();
-          if (JSON.stringify(freshData) !== JSON.stringify(dataRef.current)) {
+          // Faster check than stringifying twice every time
+          if (freshData.matches.length !== dataRef.current.matches.length || 
+              freshData.teams.length !== dataRef.current.teams.length ||
+              JSON.stringify(freshData) !== JSON.stringify(dataRef.current)) {
             isFromPoll.current = true;
             dispatch({ type: 'SET_DATA', payload: freshData });
           }
         }
       } catch (err) { /* silent */ }
-    }, 3000);
+    }, 10000); // 10 seconds instead of 3
 
     return () => clearInterval(pollInterval);
   }, []);

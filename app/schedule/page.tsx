@@ -1,4 +1,5 @@
 'use client';
+import React, { useMemo } from 'react';
 import { useAppContext } from '@/lib/context';
 import { Sport } from '@/lib/types';
 import { getTeamById } from '@/lib/store';
@@ -27,8 +28,18 @@ function groupByDate(matches: Match[]) {
 
 export default function SchedulePage() {
   const { data } = useAppContext();
-  const sorted = [...data.matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const groups = groupByDate(sorted);
+  const [mounted, setMounted] = React.useState(false);
+  
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+  
+  const groups = useMemo(() => {
+    const sorted = [...data.matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return groupByDate(sorted);
+  }, [data.matches]);
+
+  if (!mounted) return <div style={{ minHeight: '80vh' }} />;
 
   return (
     <div className="responsive-container" style={{ padding: '2rem 1rem' }}>

@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { getAllData, seedData, initDb } from '@/lib/db';
 import { AppData } from '@/lib/types';
 
 export async function GET() {
   try {
-    const data = getAllData();
+    await initDb();
+    const data = await getAllData();
     return NextResponse.json(data);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -14,8 +16,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    await initDb();
     const data: AppData = await req.json();
-    seedData(data); // Using seedData as a "sync entire data" helper for simplicity
+    await seedData(data); // Using seedData as a "sync entire data" helper for simplicity
     return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -1,10 +1,9 @@
 'use client';
+import { useMemo, useState } from 'react';
 import { useAppContext } from '@/lib/context';
-import { Sport } from '@/lib/types';
-import { getTeamById } from '@/lib/store';
-import { useState } from 'react';
 import { Filter } from 'lucide-react';
 import MatchCard from '@/components/MatchCard';
+import { Match } from '@/lib/types';
 
 const SPORTS = ['all', 'cricket', 'volleyball', 'throwball'] as const;
 const STATUSES = ['all', 'live', 'upcoming', 'completed'] as const;
@@ -14,14 +13,16 @@ export default function MatchesPage() {
   const [sport, setSport] = useState<string>('all');
   const [status, setStatus] = useState<string>('all');
 
-  const filtered = data.matches.filter(m => {
-    if (sport !== 'all' && m.sport !== sport) return false;
-    if (status !== 'all' && m.status !== status) return false;
-    return true;
-  }).sort((a, b) => {
-    const order = { live: 0, upcoming: 1, completed: 2 };
-    return order[a.status] - order[b.status];
-  });
+  const filtered = useMemo(() => {
+    return data.matches.filter((m: Match) => {
+      if (sport !== 'all' && m.sport !== sport) return false;
+      if (status !== 'all' && m.status !== status) return false;
+      return true;
+    }).sort((a: Match, b: Match) => {
+      const order: Record<string, number> = { live: 0, upcoming: 1, completed: 2 };
+      return order[a.status] - order[b.status];
+    });
+  }, [data.matches, sport, status]);
 
   return (
     <div className="responsive-container" style={{ padding: '2rem 1rem' }}>

@@ -1,13 +1,11 @@
 'use client';
 import { useAppContext } from '@/lib/context';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Shield, Plus, Users, Edit, LogOut, Activity, Trophy, Calendar, Trash2, RefreshCcw, TrendingUp } from 'lucide-react';
 import { getAutomatedStandings } from '@/lib/store';
 import { Sport } from '@/lib/types';
-
-export const dynamic = 'force-dynamic';
 
 export default function AdminDashboardPage() {
   const { data, dispatch, isAdminLoggedIn, setIsAdminLoggedIn, hydrated } = useAppContext();
@@ -24,7 +22,17 @@ export default function AdminDashboardPage() {
     }
   }, [isAdminLoggedIn, router, hydrated]);
 
-  if (!hydrated || !isAdminLoggedIn) return null;
+  const liveMatches = useMemo(() => data.matches.filter(m => m.status === 'live'), [data.matches]);
+  const upcomingMatches = useMemo(() => data.matches.filter(m => m.status === 'upcoming'), [data.matches]);
+  const completedMatches = useMemo(() => data.matches.filter(m => m.status === 'completed'), [data.matches]);
+
+  const standingsData = useMemo(() => {
+    return {
+      cricket: getAutomatedStandings(data, 'cricket'),
+      volleyball: getAutomatedStandings(data, 'volleyball'),
+      throwball: getAutomatedStandings(data, 'throwball'),
+    };
+  }, [data]);
 
   const handleReset = async () => {
     if (confirm('Restore demo defaults? This will erase current progress.')) {
@@ -56,9 +64,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const liveMatches = data.matches.filter(m => m.status === 'live');
-  const upcomingMatches = data.matches.filter(m => m.status === 'upcoming');
-  const completedMatches = data.matches.filter(m => m.status === 'completed');
+  if (!hydrated || !isAdminLoggedIn) return null;
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '2rem 1.5rem' }}>
@@ -112,7 +118,7 @@ export default function AdminDashboardPage() {
              {['#', 'Team', 'P', 'Actions'].map((h, i) => <div key={i} style={{ color: '#475569', fontSize: '0.7rem', fontWeight: 800, textAlign: i > 2 ? 'right' : 'left' }}>{h.toUpperCase()}</div>)}
           </div>
           {['cricket', 'volleyball', 'throwball'].map(s => {
-            const table = getAutomatedStandings(data, s as Sport);
+            const table = standingsData[s as keyof typeof standingsData];
             const color = s === 'cricket' ? '#f97316' : s === 'volleyball' ? '#8b5cf6' : '#ec4899';
             if (table.length === 0) return null;
             return (
