@@ -1512,6 +1512,130 @@ export function getCricketPlayerAggregates(data: AppData): CricketPlayerAggregat
   return Array.from(map.values()).filter(a => a.matches > 0 || a.innings > 0);
 }
 
+export function getVolleyballPlayerAggregates(data: AppData): VolleyballPlayerAggregate[] {
+  const teams = data.teams.filter(t => t.sport === 'volleyball');
+  const matches = data.matches.filter(m => m.sport === 'volleyball' && m.status === 'completed');
+  const map = new Map<string, VolleyballPlayerAggregate>();
+
+  for (const team of teams) {
+    for (const player of team.players) {
+      map.set(player.id, {
+        player, team, matches: 0,
+        totalPoints: 0, totalAces: 0, totalBlocks: 0, totalSpikes: 0,
+        avgPointsPerMatch: 0, potmAwards: 0, perfs: []
+      });
+    }
+  }
+
+  for (const match of matches) {
+    if (!match.playerPerformances) continue;
+    const perfs = match.playerPerformances as VolleyballPlayerPerf[];
+    for (const perf of perfs) {
+      const agg = map.get(perf.playerId);
+      if (!agg) continue;
+      agg.matches++;
+      agg.totalPoints += perf.points || 0;
+      agg.totalAces += perf.aces || 0;
+      agg.totalBlocks += perf.blocks || 0;
+      agg.totalSpikes += perf.spikes || 0;
+      if (perf.isPlayerOfMatch) agg.potmAwards++;
+      agg.perfs.push(perf);
+    }
+  }
+
+  for (const agg of map.values()) {
+    agg.avgPointsPerMatch = agg.matches > 0 ? +(agg.totalPoints / agg.matches).toFixed(2) : 0;
+  }
+
+  return Array.from(map.values()).filter(a => a.matches > 0);
+}
+
+export function getThrowballPlayerAggregates(data: AppData): ThrowballPlayerAggregate[] {
+  const teams = data.teams.filter(t => t.sport === 'throwball');
+  const matches = data.matches.filter(m => m.sport === 'throwball' && m.status === 'completed');
+  const map = new Map<string, ThrowballPlayerAggregate>();
+
+  for (const team of teams) {
+    for (const player of team.players) {
+      map.set(player.id, {
+        player, team, matches: 0,
+        totalPoints: 0, totalCatches: 0, totalIntercepts: 0,
+        avgPointsPerMatch: 0, potmAwards: 0, perfs: []
+      });
+    }
+  }
+
+  for (const match of matches) {
+    if (!match.playerPerformances) continue;
+    const perfs = match.playerPerformances as ThrowballPlayerPerf[];
+    for (const perf of perfs) {
+      const agg = map.get(perf.playerId);
+      if (!agg) continue;
+      agg.matches++;
+      agg.totalPoints += perf.points || 0;
+      agg.totalCatches += perf.catches || 0;
+      agg.totalIntercepts += perf.intercepts || 0;
+      if (perf.isPlayerOfMatch) agg.potmAwards++;
+      agg.perfs.push(perf);
+    }
+  }
+
+  for (const agg of map.values()) {
+    agg.avgPointsPerMatch = agg.matches > 0 ? +(agg.totalPoints / agg.matches).toFixed(2) : 0;
+  }
+
+  return Array.from(map.values()).filter(a => a.matches > 0);
+}
+
+export function calculateNRR(data: AppData): TeamNRR[] {
+  const cricketTeams = data.teams.filter(t => t.sport === 'cricket');
+  const cricketMatches = data.matches.filter(m => m.sport === 'cricket' && m.status === 'completed');
+  
+  const teamStats: Record<string, TeamNRR> = {};
+  cricketTeams.forEach(t => {
+    teamStats[t.id] = {
+      teamId: t.id, teamName: t.name, color: t.color,
+      runsScored: 0, oversFaced: 0, runsConceded: 0, oversBowled: 0, nrr: 0
+    };
+  });
+
+  cricketMatches.forEach(match => {
+    const score = match.score as CricketScore;
+    if (!score || !score.innings || score.innings.length < 2) return;
+
+    const inn1 = score.innings[0];
+    const inn2 = score.innings[1];
+    
+    const team1 = teamStats[inn1.battingTeamId];
+    const team2 = teamStats[inn2.battingTeamId];
+
+    if (team1 && team2) {
+      // Team 1 Batting
+      team1.runsScored += inn1.runs;
+      team1.oversFaced += inn1.isComplete ? (score.totalOvers || 20) : (inn1.overs + inn1.balls / 6);
+      
+      // Team 2 Bowling (against Team 1)
+      team2.runsConceded += inn1.runs;
+      team2.oversBowled += (inn1.overs + inn1.balls / 6);
+
+      // Team 2 Batting
+      team2.runsScored += inn2.runs;
+      team2.oversFaced += inn2.isComplete ? (score.totalOvers || 20) : (inn2.overs + inn2.balls / 6);
+
+      // Team 1 Bowling (against Team 2)
+      team1.runsConceded += inn2.runs;
+      team1.oversBowled += (inn2.overs + inn2.balls / 6);
+    }
+  });
+
+  return Object.values(teamStats).map(stats => {
+    const rf = stats.oversFaced > 0 ? stats.runsScored / stats.oversFaced : 0;
+    const ra = stats.oversBowled > 0 ? stats.runsConceded / stats.oversBowled : 0;
+    stats.nrr = rf - ra;
+    return stats;
+  }).sort((a, b) => b.nrr - a.nrr);
+}
+
 export function getTopPerformers(data: AppData, sport: Sport) {
   if (sport === 'cricket') {
     const aggs = getCricketPlayerAggregates(data);

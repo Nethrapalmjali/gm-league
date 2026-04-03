@@ -1,192 +1,110 @@
 import { sql } from '@vercel/postgres';
 import { AppData, Team, Match, Player } from './types';
 import { defaultData } from './store';
+import path from 'path';
+import fs from 'fs';
 
-// Initialize schema (Postgres)
-export async function initDb() {
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-    `;
+// Detect Vercel environment
+const isVercel = process.env.VERCEL === '1' || !!process.env.POSTGRES_URL;
 
-    await sql`
-      CREATE TABLE IF NOT EXISTS teams (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        sport TEXT NOT NULL,
-        gender TEXT NOT NULL,
-        color TEXT,
-        wins INTEGER DEFAULT 0,
-        losses INTEGER DEFAULT 0,
-        draws INTEGER DEFAULT 0,
-        points INTEGER DEFAULT 0
-      );
-    `;
-
-    await sql`
-      CREATE TABLE IF NOT EXISTS players (
-        id TEXT PRIMARY KEY,
-        team_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        jersey_number INTEGER,
-        role TEXT,
-        CONSTRAINT fk_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
-      );
-    `;
-
-    await sql`
-      CREATE TABLE IF NOT EXISTS matches (
-        id TEXT PRIMARY KEY,
-        sport TEXT NOT NULL,
-        team_a_id TEXT NOT NULL,
-        team_b_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        date TEXT NOT NULL,
-        venue TEXT,
-        round TEXT,
-        winner_id TEXT,
-        player_of_the_match TEXT,
-        score JSONB,
-        player_performances JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `;
-
-    // Ensure versioning (optional)
-    const CURRENT_VER = 'v7_pg';
-    const row = await sql`SELECT value FROM settings WHERE key = 'db_version'`;
-    const dbVer = row.rows.length ? row.rows[0].value : null;
-
-    if (dbVer !== CURRENT_VER) {
-        console.log('--- DB VERSION MISMATCH/FRESH: RESETTING POSTGRES ---');
-        await resetDb();
-        await sql`INSERT INTO settings (key, value) VALUES ('db_version', ${CURRENT_VER}) ON CONFLICT (key) DO UPDATE SET value = ${CURRENT_VER}`;
-    }
-
-    // Ensure admin password is set
-    const adminRow = await sql`SELECT value FROM settings WHERE key = 'adminPassword'`;
-    if (!adminRow.rows.length) {
-        await sql`INSERT INTO settings (key, value) VALUES ('adminPassword', ${defaultData.adminPassword})`;
-    }
-  } catch (err) {
-    console.error('initDb error:', err);
-    throw err;
+// Local SQLite fallback for testing/dev
+let localDb: any = null;
+function getLocalDb() {
+  if (!localDb) {
+    const DB_PATH = path.join(process.cwd(), 'gm_league.db');
+    const Database = eval('require')('better-sqlite3');
+    localDb = new Database(DB_PATH);
   }
+  return localDb;
+}
+
+export async function initDb() {
+  if (!isVercel) {
+    getLocalDb().exec(`
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT, sport TEXT, gender TEXT, color TEXT, wins INTEGER, losses INTEGER, draws INTEGER, points INTEGER);
+      CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, teamId TEXT, name TEXT, jerseyNumber INTEGER, role TEXT);
+      CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, sport TEXT, teamAId TEXT, teamBId TEXT, status TEXT, date TEXT, venue TEXT, round TEXT, winnerId TEXT, playerOfTheMatch TEXT, score TEXT, playerPerformances TEXT);
+    `);
+    
+    const row = getLocalDb().prepare("SELECT value FROM settings WHERE key = 'db_version'").get() as any;
+    if (!row || row.value !== 'v7_local') {
+        await resetDb();
+        getLocalDb().prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('db_version', 'v7_local');
+    }
+    return;
+  }
+
+  // Postgres Init
+  await sql`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`;
+  await sql`CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT, sport TEXT, gender TEXT, color TEXT, wins INTEGER, losses INTEGER, draws INTEGER, points INTEGER)`;
+  await sql`CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, team_id TEXT, name TEXT, jersey_number INTEGER, role TEXT)`;
+  await sql`CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, sport TEXT, team_a_id TEXT, team_b_id TEXT, status TEXT, date TEXT, venue TEXT, round TEXT, winner_id TEXT, player_of_the_match TEXT, score JSONB, player_performances JSONB)`;
 }
 
 export async function seedData(data: AppData) {
-    try {
-        await sql`DELETE FROM players`;
-        await sql`DELETE FROM teams`;
-        await sql`DELETE FROM matches`;
-
-        for (const team of data.teams) {
-            await sql`
-                INSERT INTO teams (id, name, sport, gender, color, wins, losses, draws, points)
-                VALUES (${team.id}, ${team.name}, ${team.sport}, ${team.gender}, ${team.color}, ${team.wins}, ${team.losses}, ${team.draws}, ${team.points})
-                ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name, wins = EXCLUDED.wins, losses = EXCLUDED.losses, draws = EXCLUDED.draws, points = EXCLUDED.points
-            `;
-            for (const player of team.players) {
-                await sql`
-                    INSERT INTO players (id, team_id, name, jersey_number, role)
-                    VALUES (${player.id}, ${team.id}, ${player.name}, ${player.jerseyNumber || null}, ${player.role || null})
-                    ON CONFLICT (id) DO UPDATE SET
-                    name = EXCLUDED.name, jersey_number = EXCLUDED.jersey_number, role = EXCLUDED.role
-                `;
+    if (!isVercel) {
+        getLocalDb().transaction(() => {
+            getLocalDb().prepare('DELETE FROM players').run();
+            getLocalDb().prepare('DELETE FROM teams').run();
+            getLocalDb().prepare('DELETE FROM matches').run();
+            for (const t of data.teams) {
+                getLocalDb().prepare('INSERT INTO teams VALUES (?,?,?,?,?,?,?,?,?)').run(t.id, t.name, t.sport, t.gender, t.color, t.wins, t.losses, t.draws, t.points);
+                for (const p of t.players) getLocalDb().prepare('INSERT INTO players VALUES (?,?,?,?,?)').run(p.id, t.id, p.name, p.jerseyNumber, p.role);
             }
-        }
-        for (const match of data.matches) {
-            await sql`
-                INSERT INTO matches (id, sport, team_a_id, team_b_id, status, date, venue, round, winner_id, player_of_the_match, score, player_performances)
-                VALUES (
-                    ${match.id}, ${match.sport}, ${match.teamAId}, ${match.teamBId}, ${match.status}, ${match.date},
-                    ${match.venue}, ${match.round}, ${match.winnerId || null}, ${match.playerOfTheMatch || null},
-                    ${JSON.stringify(match.score || null)}, ${JSON.stringify(match.playerPerformances || [])}
-                )
-                ON CONFLICT (id) DO UPDATE SET
-                status = EXCLUDED.status, winner_id = EXCLUDED.winner_id, score = EXCLUDED.score, 
-                player_performances = EXCLUDED.player_performances, updated_at = CURRENT_TIMESTAMP
-            `;
-        }
-    } catch (err) {
-        console.error('seedData error:', err);
-        throw err;
+            for (const m of data.matches) {
+                getLocalDb().prepare('INSERT INTO matches VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(m.id, m.sport, m.teamAId, m.teamBId, m.status, m.date, m.venue, m.round, m.winnerId, m.playerOfTheMatch, JSON.stringify(m.score), JSON.stringify(m.playerPerformances));
+            }
+        })();
+        return;
+    }
+
+    // Postgres Seed
+    await sql`DELETE FROM players`; await sql`DELETE FROM teams`; await sql`DELETE FROM matches`;
+    for (const t of data.teams) {
+        await sql`INSERT INTO teams VALUES (${t.id}, ${t.name}, ${t.sport}, ${t.gender}, ${t.color}, ${t.wins}, ${t.losses}, ${t.draws}, ${t.points})`;
+        for (const p of t.players) await sql`INSERT INTO players VALUES (${p.id}, ${t.id}, ${p.name}, ${p.jerseyNumber}, ${p.role})`;
+    }
+    for (const m of data.matches) {
+        await sql`INSERT INTO matches VALUES (${m.id}, ${m.sport}, ${m.teamAId}, ${m.teamBId}, ${m.status}, ${m.date}, ${m.venue}, ${m.round}, ${m.winnerId}, ${m.playerOfTheMatch}, ${JSON.stringify(m.score)}, ${JSON.stringify(m.playerPerformances)})`;
     }
 }
 
 export async function resetDb() {
-    await sql`DELETE FROM players`;
-    await sql`DELETE FROM teams`;
-    await sql`DELETE FROM matches`;
-    await sql`DELETE FROM settings`;
+    if (!isVercel) {
+        getLocalDb().exec('DELETE FROM players; DELETE FROM teams; DELETE FROM matches; DELETE FROM settings;');
+        await seedData(defaultData);
+        return;
+    }
+    await sql`DELETE FROM players`; await sql`DELETE FROM teams`; await sql`DELETE FROM matches`; await sql`DELETE FROM settings`;
     await seedData(defaultData);
 }
 
 export async function clearDb() {
-    await sql`DELETE FROM players`;
-    await sql`DELETE FROM teams`;
-    await sql`DELETE FROM matches`;
+    if (!isVercel) {
+        getLocalDb().exec('DELETE FROM players; DELETE FROM teams; DELETE FROM matches;'); return;
+    }
+    await sql`DELETE FROM players`; await sql`DELETE FROM teams`; await sql`DELETE FROM matches`;
 }
 
 export async function getAllData(): Promise<AppData> {
-    try {
-        const teamsRows = await sql`SELECT * FROM teams`;
-        const playersRows = await sql`SELECT * FROM players`;
-        const matchesRows = await sql`SELECT * FROM matches`;
-        const adminPasswordRow = await sql`SELECT value FROM settings WHERE key = 'adminPassword'`;
-        const adminPassword = adminPasswordRow.rows[0]?.value || 'gmleague2025';
-
-        const playersByTeam: Record<string, Player[]> = {};
-        playersRows.rows.forEach(p => {
-            if (!playersByTeam[p.team_id]) playersByTeam[p.team_id] = [];
-            playersByTeam[p.team_id].push({
-                id: p.id,
-                name: p.name,
-                jerseyNumber: p.jersey_number,
-                role: p.role
-            });
-        });
-
-        const teams: Team[] = teamsRows.rows.map(t => ({
-            id: t.id,
-            name: t.name,
-            sport: t.sport,
-            gender: t.gender,
-            color: t.color,
-            wins: t.wins,
-            losses: t.losses,
-            draws: t.draws,
-            points: t.points,
-            players: playersByTeam[t.id] || []
-        }));
-
-        const matches: Match[] = matchesRows.rows.map(m => {
-            return {
-                id: m.id,
-                sport: m.sport,
-                teamAId: m.team_a_id,
-                teamBId: m.team_b_id,
-                status: m.status,
-                date: m.date,
-                venue: m.venue,
-                round: m.round,
-                winnerId: m.winner_id,
-                playerOfTheMatch: m.player_of_the_match,
-                score: m.score,
-                playerPerformances: m.player_performances,
-                createdAt: m.created_at,
-                updatedAt: m.updated_at
-            };
-        });
-
-        return { teams, matches, adminPassword };
-    } catch (err) {
-        console.error('Error in getAllData:', err);
-        throw err;
+    if (!isVercel) {
+        const teamsRows = getLocalDb().prepare('SELECT * FROM teams').all() as any[];
+        const playersRows = getLocalDb().prepare('SELECT * FROM players').all() as any[];
+        const matchesRows = getLocalDb().prepare('SELECT * FROM matches').all() as any[];
+        const playersByTeam: any = {};
+        playersRows.forEach(p => { if (!playersByTeam[p.teamId]) playersByTeam[p.teamId] = []; playersByTeam[p.teamId].push({ id: p.id, name: p.name, jerseyNumber: p.jerseyNumber, role: p.role }); });
+        const teams = teamsRows.map(t => ({ ...t, players: playersByTeam[t.id] || [] }));
+        const matches = matchesRows.map(m => ({ ...m, teamAId: m.teamAId, teamBId: m.teamBId, winnerId: m.winnerId, playerOfTheMatch: m.playerOfTheMatch, score: JSON.parse(m.score || 'null'), playerPerformances: JSON.parse(m.playerPerformances || '[]'), createdAt: m.createdAt || new Date().toISOString(), updatedAt: m.updatedAt || new Date().toISOString() }));
+        return { teams, matches, adminPassword: 'gmleague2025' };
     }
+
+    const t = await sql`SELECT * FROM teams`;
+    const p = await sql`SELECT * FROM players`;
+    const m = await sql`SELECT * FROM matches`;
+    const playersByTeam: any = {};
+    p.rows.forEach(p => { if (!playersByTeam[p.team_id]) playersByTeam[p.team_id] = []; playersByTeam[p.team_id].push({ id: p.id, name: p.name, jerseyNumber: p.jersey_number, role: p.role }); });
+    const teams = t.rows.map(t => ({ id: t.id, name: t.name, sport: t.sport, gender: t.gender, color: t.color, wins: t.wins, losses: t.losses, draws: t.draws, points: t.points, players: playersByTeam[t.id] || [] }));
+    const matches = m.rows.map(m => ({ id: m.id, sport: m.sport, teamAId: m.team_a_id, teamBId: m.team_b_id, status: m.status, date: m.date, venue: m.venue, round: m.round, winnerId: m.winner_id, playerOfTheMatch: m.player_of_the_match, score: m.score, playerPerformances: m.player_performances, createdAt: m.created_at, updatedAt: m.updated_at }));
+    return { teams, matches, adminPassword: 'gmleague2025' };
 }
