@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GM League
 
-## Getting Started
+A web platform for running an inter-team sports league: schedules, live match scoring, standings, and player statistics for **cricket**, **volleyball** and **throwball** (men's and women's teams).
 
-First, run the development server:
+## Features
+
+- **Home / Schedule / Matches** – upcoming, live and completed fixtures with match detail pages
+- **Leaderboard** – team standings (wins, losses, draws, points; NRR for cricket)
+- **Stats & player pages** – per-player aggregates computed from match performances
+- **Admin area** (`/admin`) – login, create teams and matches, ball-by-ball cricket scoring and set-based scoring for volleyball/throwball, reset or clear league data
+
+## Tech stack
+
+- [Next.js](https://nextjs.org) (App Router) + React + TypeScript
+- Tailwind CSS, lucide-react icons, Recharts for charts
+- Storage: Vercel Postgres (`@vercel/postgres`) when deployed, with a local SQLite fallback (`better-sqlite3`) in development
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000>.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Without `POSTGRES_URL` set (and outside Vercel) the app uses a local `gm_league.db` SQLite file, which is git-ignored and seeded with default data on first run. If `better-sqlite3` is not installed, run `npm install better-sqlite3` for local development.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To use Postgres, set `POSTGRES_URL` (see `vercel env pull`) in `.env.local`. Never commit `.env*` files.
 
-## Learn More
+### Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start the dev server |
+| `npm run build` | Production build |
+| `npm start` | Serve the production build |
+| `npm run lint` | Run ESLint |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+app/            Pages (home, matches, schedule, leaderboard, stats, players, admin) and API routes
+app/api/        data (GET/POST league data), reset (restore defaults), clear (delete all)
+components/     Navbar, MatchCard, CricketBallScorer
+lib/            store.ts (default data + stats logic), db.ts (SQLite/Postgres layer),
+                context.tsx (client state + sync), types.ts, validate.ts
+```
 
-## Deploy on Vercel
+## API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `GET /api/data` – full league data (`teams`, `matches`)
+- `POST /api/data` – replace league data; the body is validated and rejected with `400` if malformed
+- `POST /api/reset` – reset to default data
+- `POST /api/clear` – delete all teams, players and matches
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+Deploys to [Vercel](https://vercel.com); see the [Next.js deployment docs](https://nextjs.org/docs/app/building-your-application/deploying).
