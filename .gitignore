@@ -46,3 +46,6 @@ next_help.txt
 dump.js
 check_api.js
 wipe_db.js
+
+# Build output logs
+build_log*.txt

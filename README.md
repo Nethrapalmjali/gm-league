@@ -36,6 +36,7 @@ To use Postgres, set `POSTGRES_URL` (see `vercel env pull`) in `.env.local`. Nev
 | `npm run build` | Production build |
 | `npm start` | Serve the production build |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run unit tests (Node 22.18+, built-in test runner) |
 
 ## Project structure
 
